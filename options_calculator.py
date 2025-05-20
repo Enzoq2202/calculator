@@ -3,9 +3,8 @@ import yfinance as yf
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Tuple, Dict, Any
+from typing import Tuple
 import logging
-import seaborn as sns
 import re
 
 # Configuração de logging
@@ -23,7 +22,6 @@ def capturar_parametros(ticker: str, periodo: str = '1y') -> Tuple[float, float,
     Returns:
         Tuple contendo (preço atual, retorno médio, volatilidade, dados históricos)
     """
-    # Validação básica do ticker
     if not ticker or not re.match(r'^[A-Z0-9.]+$', ticker):
         raise ValueError("Ticker inválido. Use formato como 'AAPL' ou 'ITUB3.SA'.")
     
@@ -102,93 +100,20 @@ def monte_carlo_opcao_asiatica(
     payoffs = np.maximum(media - K, 0)
     return np.exp(-r * T) * np.mean(payoffs)
 
-@st.cache_data
-def plot_trajetorias(
-    S0: float, 
-    T: float, 
-    r: float, 
-    sigma: float, 
-    n_sim: int = 100, 
-    n_steps: int = 252
-) -> plt.Figure:
-    """
-    Gera um gráfico moderno com simulações de trajetórias de preço.
-    Inclui design aprimorado com gradientes, anotações e estilo visual moderno.
-    
-    Args:
-        S0: Preço inicial do ativo
-        T: Tempo até expiração (em anos)
-        r: Taxa livre de risco
-        sigma: Volatilidade
-        n_sim: Número de simulações
-        n_steps: Número de passos na simulação
-    
-    Returns:
-        Figura Matplotlib com as trajetórias plotadas
-    """
-    plt.style.use('seaborn-v0_8')  # Tema atualizado
-    sns.set_context("notebook", font_scale=1.2)
-    
-    dt = T / n_steps
-    n_steps = int(T * 252)  # Ajustar passos proporcionalmente ao tempo
-    trajetorias = []
-    
-    for _ in range(min(n_sim, 50)):
-        prices = [S0]
-        for _ in range(n_steps):
-            Z = np.random.standard_normal()
-            St = prices[-1] * np.exp((r - 0.5 * sigma**2) * dt + sigma * np.sqrt(dt) * Z)
-            prices.append(St)
-        trajetorias.append(prices)
-    
-    trajetorias = np.array(trajetorias)
-    media = trajetorias.mean(axis=0)
-    
-    fig = plt.figure(figsize=(12, 7), dpi=100)
-    ax = fig.add_subplot(111)
-    
-    for i, traj in enumerate(trajetorias):
-        ax.plot(traj, color=sns.color_palette("Blues", n_colors=50)[min(i, 49)], 
-                alpha=0.15, linewidth=1.2)
-    
-    ax.plot(media, color='#e67e22', linewidth=3, label='Média das Trajetórias', zorder=10)
-    from matplotlib.patheffects import withStroke
-    ax.get_lines()[-1].set_path_effects([withStroke(linewidth=5, foreground='black', alpha=0.2)])
-    
-    ax.axhline(S0, color='gray', linestyle='--', alpha=0.5, label=f'Preço Inicial ($ {S0:.2f})')
-    
-    ax.set_title('Simulação Monte Carlo - Trajetórias de Preço', 
-                 fontsize=18, pad=20, fontweight='bold', color='#2c3e50')
-    ax.set_xlabel('Dias', fontsize=14, color='#34495e')
-    ax.set_ylabel('Preço ($)', fontsize=14, color='#34495e')
-    
-    ax.grid(True, linestyle='--', alpha=0.4, color='#bdc3c7')
-    ax.legend(loc='upper left', frameon=True, framealpha=0.95, 
-              facecolor='white', edgecolor='#ecf0f1', fontsize=12)
-    
-    ax.annotate(f'Média Final: ${media[-1]:.2f}', 
-                xy=(n_steps, media[-1]), 
-                xytext=(n_steps-50, media[-1]+S0*0.05),
-                arrowprops=dict(facecolor='black', arrowstyle='->'),
-                fontsize=12, color='#2c3e50', bbox=dict(facecolor='white', alpha=0.8))
-    
-    ax.margins(y=0.1)
-    fig.tight_layout()
-    
-    return fig
-
 def main():
-    """Função principal que configura e executa a interface Streamlit."""
+    """Página principal para entrada de parâmetros e cálculo de preços."""
     st.set_page_config(
-        page_title="Calculadora de Opções", 
-        page_icon="📈", 
-        layout="wide"
+        page_title="Calculadora de Opções",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
 
     st.markdown("""
     # 🎉 Calculadora de Opções
     Este aplicativo permite calcular preços de **Opções Europeias** e **Opções Asiáticas** 
-    usando simulação Monte Carlo.
+    usando simulação Monte Carlo. Use a barra lateral para configurar os parâmetros e 
+    navegue até a página "Simulações Monte Carlo" para visualizar as trajetórias.
     """)
 
     # Sidebar com configurações
@@ -213,7 +138,7 @@ def main():
         max_value=20.0,
         value=4.0,
         step=0.1
-    ) / 100  # Converter para decimal
+    ) / 100
 
     # Seleção de tipo de opção e ticker
     option_type = st.radio(
@@ -230,11 +155,12 @@ def main():
     col1, col2 = st.columns(2)
     with col1:
         strike_percent = st.slider(
-            "Strike (% acima do preço atual)",
-            min_value=0,
+            "Strike (% acima/abaixo do preço atual)",
+            min_value=-50,
             max_value=50,
             value=5,
-            step=1
+            step=1,
+            help="Valores negativos indicam strike abaixo do preço atual"
         )
     
     with col2:
@@ -253,6 +179,18 @@ def main():
                 K = S0 * (1 + strike_percent/100)
                 T = tempo_expiracao
 
+                # Armazenar parâmetros no session_state para a página Monte Carlo
+                st.session_state['S0'] = S0
+                st.session_state['mu'] = mu
+                st.session_state['sigma'] = sigma
+                st.session_state['dados'] = dados
+                st.session_state['K'] = K
+                st.session_state['T'] = T
+                st.session_state['r'] = r
+                st.session_state['n_sim'] = n_sim
+                st.session_state['ticker'] = ticker
+                st.session_state['option_type'] = option_type
+
                 if option_type == "Opção Europeia":
                     price = monte_carlo_opcao_europeia(S0, K, T, r, sigma, n_sim)
                 else:
@@ -268,20 +206,16 @@ def main():
 
                 # Gráfico de histórico de preço
                 st.subheader("📈 Histórico de Preço")
-                fig_hist, ax_hist = plt.subplots(figsize=(10, 4))
+                fig_hist = plt.figure(figsize=(10, 4))
+                ax_hist = fig_hist.add_subplot(111)
                 dados['Close'].plot(ax=ax_hist)
                 ax_hist.set_title(f"Fechamento Diário - {ticker}")
                 ax_hist.set_xlabel("Data")
                 ax_hist.set_ylabel("Preço ($)")
                 st.pyplot(fig_hist)
+                plt.close(fig_hist)
+                st.success("Cálculos concluídos! Acesse a página 'Simulações Monte Carlo' na barra lateral para ver as trajetórias e ajustar o horizonte temporal, se desejar.")
 
-                # Simulação de trajetórias
-                if st.checkbox("Mostrar simulações Monte Carlo"):
-                    st.subheader("🚀 Simulações Monte Carlo")
-                    st.write("Apenas 50 trajetórias são exibidas para melhor visualização.")
-                    fig_sim = plot_trajetorias(S0, T, r, sigma, n_sim=min(n_sim, 100))
-                    st.pyplot(fig_sim)
-    
         except Exception as e:
             st.error(f"Erro ao processar: {str(e)}. Verifique o ticker ou a conexão com a internet.")
             logger.error(f"Erro na execução: {str(e)}")
